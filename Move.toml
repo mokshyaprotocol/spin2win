@@ -1,0 +1,15 @@
+[package]
+name = "spin2win"
+version = "1.0.0"
+authors = []
+
+[addresses]
+spin2win = "0x38987df5c07066fd5874d865f82e108281b7868ba969485575296c2dded47028"
+[dev-addresses]
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-core.git"
+rev = "mainnet"
+subdir = "aptos-move/framework/aptos-framework"
+
+[dev-dependencies]
