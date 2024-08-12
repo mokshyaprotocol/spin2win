@@ -5,9 +5,13 @@ module spin2win::spin {
     use aptos_framework::event::{Self, EventHandle};
     use aptos_framework::object::{Self, Object};
     use aptos_framework::aptos_account;
-
+    use aptos_framework::randomness::{Self};
+    use aptos_std::ed25519;
+    use std::bcs;
     /// Caller of transaction is not the admin of the contract
     const EINVALID_SIGNER: u64 = 0;
+    /// Signature is not signed by admin
+    const ESIGNATURE_MISMATCHED: u64 =2;
 
     const PRIZE_TYPE_COIN: u8 = 0;
     const PRIZE_TYPE_TOKEN: u8 = 1;
@@ -20,6 +24,10 @@ module spin2win::spin {
         token_address: address, // Only relevant for TOKEN or NFT
         collection_address: address, // Only relevant for NFTs, specifies the collection
         probability: u64, // Probability of winning this prize
+    }
+
+    struct Spin has key,store,drop{
+        nonce: u64
     }
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
@@ -58,7 +66,7 @@ module spin2win::spin {
         move_to(account, prize_pool);
     }
 
-    public fun add_prize<CoinType>(
+    public entry fun add_prize<CoinType>(
         account: &signer, 
         prize_type: u8, 
         value: u64, 
@@ -66,7 +74,7 @@ module spin2win::spin {
         collection_address: address, 
         probability: u64
     ) acquires PrizePool {
-        let pool = borrow_global_mut<PrizePool>(signer::address_of(account));
+        let pool = borrow_global_mut<PrizePool>(@spin2win);
         
         // Handle prize data in a simpler manner, possibly storing them outside the resource.
         let prize = Prize {
@@ -98,19 +106,66 @@ module spin2win::spin {
         prize_type: u8, 
         value: u64, 
         token_address: address, 
-        collection_address: address
+        collection_address: address,
+        receiver: address
     ) {
         if (prize_type == PRIZE_TYPE_COIN) {
-            aptos_account::transfer_coins<CoinType>(purchaser, fee_address, fee);
+            distribute_coin<CoinType>(account, receiver, value);
         } else if (prize_type == PRIZE_TYPE_TOKEN) {
-            distribute_token(account, token_address, value);
+            distribute_coin<CoinType>(account, receiver, value);
+            // distribute_token(account, token_address, value);
         } else if (prize_type == PRIZE_TYPE_NFT) {
-            distribute_nft(account, collection_address, token_address, value);
+            // distribute_nft(account, collection_address, token_address, value);
         } else if (prize_type == PRIZE_TYPE_POINTS) {
-            distribute_points(account, value);
+            // distribute_points(account, value);
         }
     }
-    fun distribute_coin(account: &signer, amount: u64) {
-        AptosCoin::transfer(account, Signer::address_of(account), amount);
+
+    fun distribute_coin<CoinType>(account: &signer, receiver:address, amount: u64) {
+        aptos_account::transfer_coins<CoinType>(account, receiver, amount);
+    }
+
+    #[randomness]
+    entry fun spin(account: &signer,signature: vector<u8>,) acquires PrizePool, SpinEvents,Spin{
+        let spinner_addr = signer::address_of(account);
+        if (!exists<Spin>(spinner_addr)){
+            let spin = Spin {
+                nonce: 0
+            };
+            move_to(account, spin);
+        };
+        let spin_info = borrow_global_mut<Spin>(spinner_addr);
+        let pool = borrow_global_mut<PrizePool>(@spin2win);
+        let pk_bytes= x"6b8a589130ce4e558238d864b2c2a77f9e35dda290b98de9d2cb7490665c731f";
+        let vpk = &ed25519::public_key_to_unvalidated(&std::option::extract(&mut ed25519::new_validated_public_key_from_bytes(pk_bytes)));
+        let msg = bcs::to_bytes(&spinner_addr);
+        vector::append(&mut msg, bcs::to_bytes(&spin_info.nonce));
+        // Ensure that nonce is signed by admin
+        assert!(ed25519::signature_verify_strict(&ed25519::new_signature_from_bytes(signature),&ed25519::public_key_to_unvalidated(&std::option::extract(&mut ed25519::new_validated_public_key_from_bytes(pk_bytes))), msg), ESIGNATURE_MISMATCHED);
+        
+        let max_prob = *vector::borrow(&pool.cumulative_probabilities, vector::length(&pool.cumulative_probabilities) - 1);
+        let rand = randomness::u64_range(0, max_prob);
+        let selected_prize_index = select_prize(&pool.cumulative_probabilities, rand);
+        let selected_prize = vector::borrow(&pool.prizes, selected_prize_index);
+
+        let event_handle = borrow_global_mut<SpinEvents>(@spin2win);
+        let spin_event = SpinEvent {
+            spinner: signer::address_of(account),
+            prize_type: selected_prize.prize_type,
+            value: selected_prize.value,
+            token_address: selected_prize.token_address,
+            collection_address: selected_prize.collection_address,
+            probability: selected_prize.probability,
+        };
+        spin_info.nonce = spin_info.nonce+1;
+        event::emit_event(&mut event_handle.event,spin_event)
+    }
+    fun select_prize(cumulative_probabilities: &vector<u64>, rand: u64): u64 {
+        for (i in 0..vector::length(cumulative_probabilities)) {
+            if (rand < *vector::borrow(cumulative_probabilities, i)) {
+                return i
+            }
+        };
+        return 0 // Default to the first prize if something goes wrong
     }
 }

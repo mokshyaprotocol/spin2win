@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-spin2win = "0x38987df5c07066fd5874d865f82e108281b7868ba969485575296c2dded47028"
+spin2win = "0x452cda0816d56857bd597bfc7d82cad2da1bfc6197c1eadb2a6476966ac3e9ea"
 [dev-addresses]
 
 [dependencies.AptosFramework]
