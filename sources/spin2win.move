@@ -1,3 +1,5 @@
+//To-do 
+// Remove prize from the prize struct on nft once the nft has been won 
 module spin2win::spin {
     use std::signer;
     use std::string::{Self, String};
@@ -55,6 +57,7 @@ module spin2win::spin {
     struct Admin has key {
         admin: address,
         resource_cap: account::SignerCapability,
+        token: vector<TokenV1>,
     }
 
     fun init_module(account: &signer) {
@@ -63,6 +66,7 @@ module spin2win::spin {
         move_to<Admin>(account, Admin {
             admin: signer::address_of(account),
             resource_cap,
+            token
         });
         let constructor_ref = object::create_object_from_account(account);
         let object_signer = object::generate_signer(&constructor_ref);
@@ -186,5 +190,22 @@ module spin2win::spin {
         let object = object::address_to_object<Token>(token_address);
         object::transfer(account,object,receiver);
         // token::transfer(&admin,token_address,receiver,1)
+    }
+
+    fun deposit_v1_nft(
+        account: &signer
+        token_creator: address,
+        token_collection: String,
+        token_name: String,
+        token_property_version: u64,
+    ){
+        let admin_info = borrow_global_mut<Admin>(@spin2win);
+        let token_id = tokenv1::create_token_id_raw(
+            token_creator,
+            token_collection,
+            token_name,
+            token_property_version,
+        );
+
     }
 }

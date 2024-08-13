@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-spin2win = "0x9e84c62c0e57768333da88938589bfd799986f39930e80779fc9a838746fe265"
+spin2win = "0x5d47402fd21c0c19222e1bfd7434d193a2fcdc8a5d11f3fb009f10a047a4b9f3"
 [dev-addresses]
 
 [dependencies]
