@@ -101,6 +101,7 @@ module spin2win::spin {
         collection_address: address, 
         probability: u64
     ) acquires PrizePool {
+        assert!(@spin2win == signer::address_of(account), EINVALID_SIGNER);
         let pool = borrow_global_mut<PrizePool>(@spin2win);
         
         // Handle prize data in a simpler manner, possibly storing them outside the resource.
@@ -218,6 +219,7 @@ module spin2win::spin {
         token_name: String,
         token_property_version: u64,
     ){
+        assert!(@spin2win == signer::address_of(account), EINVALID_SIGNER);
         let token_id = tokenv1::create_token_id_raw(
             token_creator,
             token_collection,
@@ -228,7 +230,7 @@ module spin2win::spin {
         create_tokenv1_container_with_token(account, token)
     }
 
-    public fun create_tokenv1_container_with_token(
+    fun create_tokenv1_container_with_token(
         account: &signer,
         token: TokenV1,
     ){
