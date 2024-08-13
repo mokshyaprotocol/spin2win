@@ -5,8 +5,10 @@ module spin2win::spin {
     use aptos_framework::event::{Self, EventHandle};
     use aptos_framework::object::{Self, Object};
     use aptos_framework::aptos_account;
+    use aptos_framework::account;
     use aptos_framework::randomness::{Self};
     use aptos_std::ed25519;
+    use aptos_token_objects::token::{Token};
     use std::bcs;
     /// Caller of transaction is not the admin of the contract
     const EINVALID_SIGNER: u64 = 0;
@@ -49,8 +51,19 @@ module spin2win::spin {
         probability: u64,
     }
 
+    /// Admin structure with administrative privileges
+    struct Admin has key {
+        admin: address,
+        resource_cap: account::SignerCapability,
+    }
 
     fun init_module(account: &signer) {
+        let (_resource, resource_cap) = account::create_resource_account(account, x"02");
+        let resource_signer_from_cap = account::create_signer_with_capability(&resource_cap);
+        move_to<Admin>(account, Admin {
+            admin: signer::address_of(account),
+            resource_cap,
+        });
         let constructor_ref = object::create_object_from_account(account);
         let object_signer = object::generate_signer(&constructor_ref);
         let event_handle = SpinEvents{
@@ -100,33 +113,8 @@ module spin2win::spin {
         vector::push_back(&mut pool.cumulative_probabilities, sum + new_probability);
     }
 
-        // Function to distribute the prize based on its type
-    fun distribute_prize<CoinType>(
-        account: &signer, 
-        prize_type: u8, 
-        value: u64, 
-        token_address: address, 
-        collection_address: address,
-        receiver: address
-    ) {
-        if (prize_type == PRIZE_TYPE_COIN) {
-            distribute_coin<CoinType>(account, receiver, value);
-        } else if (prize_type == PRIZE_TYPE_TOKEN) {
-            distribute_coin<CoinType>(account, receiver, value);
-            // distribute_token(account, token_address, value);
-        } else if (prize_type == PRIZE_TYPE_NFT) {
-            // distribute_nft(account, collection_address, token_address, value);
-        } else if (prize_type == PRIZE_TYPE_POINTS) {
-            // distribute_points(account, value);
-        }
-    }
-
-    fun distribute_coin<CoinType>(account: &signer, receiver:address, amount: u64) {
-        aptos_account::transfer_coins<CoinType>(account, receiver, amount);
-    }
-
     #[randomness]
-    entry fun spin(account: &signer,signature: vector<u8>,) acquires PrizePool, SpinEvents,Spin{
+    entry fun spin<CoinType>(account: &signer,signature: vector<u8>,) acquires PrizePool, SpinEvents,Spin,Admin{
         let spinner_addr = signer::address_of(account);
         if (!exists<Spin>(spinner_addr)){
             let spin = Spin {
@@ -150,16 +138,21 @@ module spin2win::spin {
 
         let event_handle = borrow_global_mut<SpinEvents>(@spin2win);
         let spin_event = SpinEvent {
-            spinner: signer::address_of(account),
+            spinner: spinner_addr,
             prize_type: selected_prize.prize_type,
             value: selected_prize.value,
             token_address: selected_prize.token_address,
             collection_address: selected_prize.collection_address,
             probability: selected_prize.probability,
         };
+        let admin_info = borrow_global_mut<Admin>(@spin2win);
+        let admin = account::create_signer_with_capability(&admin_info.resource_cap);
+        distribute_prize<CoinType>(&admin,selected_prize.prize_type,selected_prize.value,selected_prize.token_address,selected_prize.collection_address,spinner_addr);
         spin_info.nonce = spin_info.nonce+1;
         event::emit_event(&mut event_handle.event,spin_event)
     }
+
+    entry
     fun select_prize(cumulative_probabilities: &vector<u64>, rand: u64): u64 {
         for (i in 0..vector::length(cumulative_probabilities)) {
             if (rand < *vector::borrow(cumulative_probabilities, i)) {
@@ -167,5 +160,31 @@ module spin2win::spin {
             }
         };
         return 0 // Default to the first prize if something goes wrong
+    }
+
+    // Function to distribute the prize based on its type
+    fun distribute_prize<CoinType>(
+        account: &signer, 
+        prize_type: u8, 
+        value: u64, 
+        token_address: address, 
+        collection_address: address,
+        receiver: address
+    ) {
+        if (prize_type == PRIZE_TYPE_COIN || prize_type == PRIZE_TYPE_TOKEN) {
+            distribute_coin<CoinType>(account, receiver, value);
+        } else if (prize_type == PRIZE_TYPE_NFT) {
+            distribute_nft(account, token_address,receiver);
+        }
+    }
+
+    fun distribute_coin<CoinType>(account: &signer, receiver:address, amount: u64) {
+        aptos_account::transfer_coins<CoinType>(account, receiver, amount);
+    }
+
+    fun distribute_nft(account: &signer,token_address:address,receiver:address){
+        let object = object::address_to_object<Token>(token_address);
+        object::transfer(account,object,receiver);
+        // token::transfer(&admin,token_address,receiver,1)
     }
 }

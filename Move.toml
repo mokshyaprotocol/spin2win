@@ -4,12 +4,11 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-spin2win = "0x452cda0816d56857bd597bfc7d82cad2da1bfc6197c1eadb2a6476966ac3e9ea"
+spin2win = "0x9e84c62c0e57768333da88938589bfd799986f39930e80779fc9a838746fe265"
 [dev-addresses]
 
-[dependencies.AptosFramework]
-git = "https://github.com/aptos-labs/aptos-core.git"
-rev = "mainnet"
-subdir = "aptos-move/framework/aptos-framework"
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git",rev="mainnet",subdir="aptos-move/framework/aptos-framework"}
+AptosTokenObjects = { git = "https://github.com/aptos-labs/aptos-core.git",rev="mainnet",subdir="aptos-move/framework/aptos-token-objects"}
 
 [dev-dependencies]
