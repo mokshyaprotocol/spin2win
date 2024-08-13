@@ -10,5 +10,6 @@ spin2win = "0x5d47402fd21c0c19222e1bfd7434d193a2fcdc8a5d11f3fb009f10a047a4b9f3"
 [dependencies]
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git",rev="mainnet",subdir="aptos-move/framework/aptos-framework"}
 AptosTokenObjects = { git = "https://github.com/aptos-labs/aptos-core.git",rev="mainnet",subdir="aptos-move/framework/aptos-token-objects"}
+AptosToken = { git = "https://github.com/aptos-labs/aptos-core.git",rev="mainnet",subdir="aptos-move/framework/aptos-token"}
 
 [dev-dependencies]

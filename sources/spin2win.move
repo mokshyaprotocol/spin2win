@@ -5,12 +5,13 @@ module spin2win::spin {
     use std::string::{Self, String};
     use std::vector;
     use aptos_framework::event::{Self, EventHandle};
-    use aptos_framework::object::{Self, Object};
+    use aptos_framework::object::{Self, Object,DeleteRef,TransferRef};
     use aptos_framework::aptos_account;
     use aptos_framework::account;
     use aptos_framework::randomness::{Self};
     use aptos_std::ed25519;
     use aptos_token_objects::token::{Token};
+    use aptos_token::token::{Self as tokenv1, Token as TokenV1};
     use std::bcs;
     /// Caller of transaction is not the admin of the contract
     const EINVALID_SIGNER: u64 = 0;
@@ -25,7 +26,7 @@ module spin2win::spin {
     struct Prize has store,drop{
         prize_type: u8, // Represents the type of prize (COIN, TOKEN, NFT, POINTS)
         value: u64, // Could represent amount for COIN/TOKEN/POINTS or ID for NFT
-        token_address: address, // Only relevant for TOKEN or NFT
+        token_address: vector<address>, // Only relevant for TOKEN or NFT
         collection_address: address, // Only relevant for NFTs, specifies the collection
         probability: u64, // Probability of winning this prize
     }
@@ -57,7 +58,17 @@ module spin2win::spin {
     struct Admin has key {
         admin: address,
         resource_cap: account::SignerCapability,
-        token: vector<TokenV1>,
+    }
+
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    /// Contains a tokenv1 as an object
+    struct TokenV1Container has key {
+        /// The stored token.
+        token: TokenV1,
+        /// Used to cleanup the object at the end
+        delete_ref: DeleteRef,
+        /// Used to transfer the tokenv1 at the conclusion of a purchase.
+        transfer_ref: TransferRef,
     }
 
     fun init_module(account: &signer) {
@@ -66,7 +77,6 @@ module spin2win::spin {
         move_to<Admin>(account, Admin {
             admin: signer::address_of(account),
             resource_cap,
-            token
         });
         let constructor_ref = object::create_object_from_account(account);
         let object_signer = object::generate_signer(&constructor_ref);
@@ -87,7 +97,7 @@ module spin2win::spin {
         account: &signer, 
         prize_type: u8, 
         value: u64, 
-        token_address: address, 
+        token_address: vector<address>, 
         collection_address: address, 
         probability: u64
     ) acquires PrizePool {
@@ -118,7 +128,7 @@ module spin2win::spin {
     }
 
     #[randomness]
-    entry fun spin<CoinType>(account: &signer,signature: vector<u8>,) acquires PrizePool, SpinEvents,Spin,Admin{
+    entry fun spin<CoinType>(account: &signer,signature: vector<u8>,) acquires PrizePool, SpinEvents,Spin,Admin,TokenV1Container{
         let spinner_addr = signer::address_of(account);
         if (!exists<Spin>(spinner_addr)){
             let spin = Spin {
@@ -139,24 +149,23 @@ module spin2win::spin {
         let rand = randomness::u64_range(0, max_prob);
         let selected_prize_index = select_prize(&pool.cumulative_probabilities, rand);
         let selected_prize = vector::borrow(&pool.prizes, selected_prize_index);
-
+        let select_prize_token_address = *vector::borrow(&selected_prize.token_address, 0);
         let event_handle = borrow_global_mut<SpinEvents>(@spin2win);
         let spin_event = SpinEvent {
             spinner: spinner_addr,
             prize_type: selected_prize.prize_type,
             value: selected_prize.value,
-            token_address: selected_prize.token_address,
+            token_address: select_prize_token_address,
             collection_address: selected_prize.collection_address,
             probability: selected_prize.probability,
         };
         let admin_info = borrow_global_mut<Admin>(@spin2win);
         let admin = account::create_signer_with_capability(&admin_info.resource_cap);
-        distribute_prize<CoinType>(&admin,selected_prize.prize_type,selected_prize.value,selected_prize.token_address,selected_prize.collection_address,spinner_addr);
+        distribute_prize<CoinType>(&admin,selected_prize.prize_type,selected_prize.value,select_prize_token_address,selected_prize.collection_address,spinner_addr);
         spin_info.nonce = spin_info.nonce+1;
         event::emit_event(&mut event_handle.event,spin_event)
     }
 
-    entry
     fun select_prize(cumulative_probabilities: &vector<u64>, rand: u64): u64 {
         for (i in 0..vector::length(cumulative_probabilities)) {
             if (rand < *vector::borrow(cumulative_probabilities, i)) {
@@ -174,7 +183,7 @@ module spin2win::spin {
         token_address: address, 
         collection_address: address,
         receiver: address
-    ) {
+    )acquires TokenV1Container{
         if (prize_type == PRIZE_TYPE_COIN || prize_type == PRIZE_TYPE_TOKEN) {
             distribute_coin<CoinType>(account, receiver, value);
         } else if (prize_type == PRIZE_TYPE_NFT) {
@@ -186,26 +195,62 @@ module spin2win::spin {
         aptos_account::transfer_coins<CoinType>(account, receiver, amount);
     }
 
-    fun distribute_nft(account: &signer,token_address:address,receiver:address){
-        let object = object::address_to_object<Token>(token_address);
-        object::transfer(account,object,receiver);
-        // token::transfer(&admin,token_address,receiver,1)
+    fun distribute_nft(account: &signer,token_address:address,receiver:address)acquires TokenV1Container{
+        if (exists<TokenV1Container>(token_address)){
+            let TokenV1Container {
+                token,
+                delete_ref,
+                transfer_ref: _,
+            } = move_from(token_address);
+            tokenv1::deposit_token(account, token);
+            object::delete(delete_ref);
+        }
+        else{
+            let object = object::address_to_object<Token>(token_address);
+            object::transfer(account,object,receiver);
+        }
     }
 
-    fun deposit_v1_nft(
-        account: &signer
+    public entry fun create_tokenv1_container(
+        account: &signer,
         token_creator: address,
         token_collection: String,
         token_name: String,
         token_property_version: u64,
     ){
-        let admin_info = borrow_global_mut<Admin>(@spin2win);
         let token_id = tokenv1::create_token_id_raw(
             token_creator,
             token_collection,
             token_name,
             token_property_version,
         );
+        let token = tokenv1::withdraw_token(account, token_id, 1);
+        create_tokenv1_container_with_token(account, token)
+    }
 
+    public fun create_tokenv1_container_with_token(
+        account: &signer,
+        token: TokenV1,
+    ){
+        let constructor_ref = object::create_object_from_account(account);
+        let container_signer = object::generate_signer(&constructor_ref);
+        let delete_ref = object::generate_delete_ref(&constructor_ref);
+        let transfer_ref = object::generate_transfer_ref(&constructor_ref);
+
+        move_to(&container_signer, TokenV1Container { token, delete_ref, transfer_ref });
+    }
+    public entry fun deposit_v1_nft(
+        account: &signer,
+        token_creator: address,
+        token_collection: String,
+        token_name: vector<String>,
+        token_property_version: u64,
+    ){
+        let i = 0;
+        while (i < vector::length(&token_name)){
+            let name = *vector::borrow(&token_name, i);
+            create_tokenv1_container(account,token_creator,token_collection,name,token_property_version);
+            i=i+1
+        }
     }
 }
