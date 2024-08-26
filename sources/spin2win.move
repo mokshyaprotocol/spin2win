@@ -10,6 +10,7 @@ module spin2win::spin {
     use aptos_framework::account;
     use aptos_framework::randomness::{Self};
     use aptos_std::ed25519;
+    use aptos_framework::aptos_coin::AptosCoin;
     use aptos_token_objects::token::{Token};
     use aptos_token::token::{Self as tokenv1, Token as TokenV1};
     use std::bcs;
@@ -32,12 +33,17 @@ module spin2win::spin {
     }
 
     struct Spin has key,store,drop{
-        nonce: u64
+        prize_type: vector<u8>,
+        nonce: u64,
+        value: vector<u64>,
+        token_address: vector<address>,
+        collection_address: vector<address>,
     }
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     struct SpinEvents has key{
         event: EventHandle<SpinEvent>,
+        claim_event: EventHandle<PrizeClaimEvent>,
     }
 
     struct PrizePool has key,store{
@@ -54,6 +60,13 @@ module spin2win::spin {
         probability: u64,
     }
 
+    struct PrizeClaimEvent has drop, store {
+        spinner: address,
+        prize_type: vector<u8>,
+        value: vector<u64>,
+        token_address: vector<address>,
+        collection_address: vector<address>,
+    }
     /// Admin structure with administrative privileges
     struct Admin has key {
         admin: address,
@@ -81,9 +94,9 @@ module spin2win::spin {
         let constructor_ref = object::create_object_from_account(account);
         let object_signer = object::generate_signer(&constructor_ref);
         let event_handle = SpinEvents{
-            event: object::new_event_handle(&object_signer)
+            event: object::new_event_handle(&object_signer),
+            claim_event: object::new_event_handle(&object_signer)
         };
-
         let prize_pool = PrizePool {
             prizes: vector[],
             cumulative_probabilities: vector[],
@@ -129,10 +142,14 @@ module spin2win::spin {
     }
 
     #[randomness]
-    entry fun spin<CoinType>(account: &signer,signature: vector<u8>,) acquires PrizePool, SpinEvents,Spin,Admin,TokenV1Container{
+    entry fun spin<CoinType>(account: &signer,signature: vector<u8>,) acquires PrizePool, SpinEvents,Spin{
         let spinner_addr = signer::address_of(account);
         if (!exists<Spin>(spinner_addr)){
             let spin = Spin {
+                prize_type: vector[],
+                value: vector[],
+                token_address: vector[],
+                collection_address: vector[],
                 nonce: 0
             };
             move_to(account, spin);
@@ -160,11 +177,41 @@ module spin2win::spin {
             collection_address: selected_prize.collection_address,
             probability: selected_prize.probability,
         };
+        // let admin_info = borrow_global_mut<Admin>(@spin2win);
+        // let admin = account::create_signer_with_capability(&admin_info.resource_cap);
+        // distribute_prize<CoinType>(&admin,selected_prize.prize_type,selected_prize.value,select_prize_token_address,selected_prize.collection_address,spinner_addr);
+        vector::push_back(&mut spin_info.prize_type , selected_prize.prize_type);
+        vector::push_back(&mut spin_info.value , selected_prize.value);
+        vector::push_back(&mut spin_info.token_address , select_prize_token_address);
+        vector::push_back(&mut spin_info.collection_address , selected_prize.collection_address);
+        spin_info.nonce = spin_info.nonce+1;
+        event::emit_event(&mut event_handle.event,spin_event);
+        vector::remove(&mut pool.prizes, selected_prize_index);
+    }
+
+    entry fun claim_prizes<CoinType>(account: &signer,) acquires Spin,Admin,TokenV1Container,SpinEvents{
+        let spinner_addr = signer::address_of(account);
+        let spin_info = borrow_global_mut<Spin>(spinner_addr);
         let admin_info = borrow_global_mut<Admin>(@spin2win);
         let admin = account::create_signer_with_capability(&admin_info.resource_cap);
-        distribute_prize<CoinType>(&admin,selected_prize.prize_type,selected_prize.value,select_prize_token_address,selected_prize.collection_address,spinner_addr);
-        spin_info.nonce = spin_info.nonce+1;
-        event::emit_event(&mut event_handle.event,spin_event)
+        let i = 0;
+        while (i < vector::length(&spin_info.prize_type)){
+            distribute_prize<CoinType>(&admin,*vector::borrow(&spin_info.prize_type, i),*vector::borrow(&spin_info.value, i),*vector::borrow(&spin_info.token_address, i),*vector::borrow(&spin_info.collection_address, i),spinner_addr);
+            i=i+1
+        };
+        spin_info.prize_type =vector[];
+        spin_info.value =vector[];
+        spin_info.token_address =vector[];
+        spin_info.collection_address =vector[];
+        let event_handle = borrow_global_mut<SpinEvents>(@spin2win);
+        let prize_claim_event = PrizeClaimEvent {
+            spinner: spinner_addr,
+            prize_type: spin_info.prize_type,
+            value: spin_info.value,
+            token_address: spin_info.token_address,
+            collection_address: spin_info.collection_address,
+        };
+        event::emit_event(&mut event_handle.claim_event,prize_claim_event)
     }
 
     fun select_prize(cumulative_probabilities: &vector<u64>, rand: u64): u64 {
@@ -185,10 +232,12 @@ module spin2win::spin {
         collection_address: address,
         receiver: address
     )acquires TokenV1Container{
-        if (prize_type == PRIZE_TYPE_COIN || prize_type == PRIZE_TYPE_TOKEN) {
+        if (prize_type == PRIZE_TYPE_COIN && prize_type == PRIZE_TYPE_TOKEN) {
             distribute_coin<CoinType>(account, receiver, value);
         } else if (prize_type == PRIZE_TYPE_NFT) {
             distribute_nft(account, token_address,receiver);
+        } else{
+            distribute_coin<AptosCoin>(account, receiver, value);
         }
     }
 
