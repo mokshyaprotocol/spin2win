@@ -186,7 +186,7 @@ module spin2win::spin {
         vector::push_back(&mut spin_info.collection_address , selected_prize.collection_address);
         spin_info.nonce = spin_info.nonce+1;
         event::emit_event(&mut event_handle.event,spin_event);
-        vector::remove(&mut pool.prizes, selected_prize_index);
+        vector::remove(&mut selected_prize.token_address, 0); 
     }
 
     entry fun claim_prizes<CoinType>(account: &signer,) acquires Spin,Admin,TokenV1Container,SpinEvents{
