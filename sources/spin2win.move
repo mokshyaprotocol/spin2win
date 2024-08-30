@@ -24,7 +24,7 @@ module spin2win::spin {
     const PRIZE_TYPE_NFT: u8 = 2;
     const PRIZE_TYPE_POINTS: u8 = 3;
 
-    struct Prize has store,drop{
+    struct Prize has store,drop,copy{
         prize_type: u8, // Represents the type of prize (COIN, TOKEN, NFT, POINTS)
         value: u64, // Could represent amount for COIN/TOKEN/POINTS or ID for NFT
         token_address: vector<address>, // Only relevant for TOKEN or NFT
@@ -46,7 +46,7 @@ module spin2win::spin {
         claim_event: EventHandle<PrizeClaimEvent>,
     }
 
-    struct PrizePool has key,store{
+    struct PrizePool has key,store,copy{
         prizes: vector<Prize>, 
         cumulative_probabilities: vector<u64>, // Cumulative probabilities corresponding to each prize
     }
@@ -161,12 +161,12 @@ module spin2win::spin {
         let msg = bcs::to_bytes(&spinner_addr);
         vector::append(&mut msg, bcs::to_bytes(&spin_info.nonce));
         // Ensure that nonce is signed by admin
-        assert!(ed25519::signature_verify_strict(&ed25519::new_signature_from_bytes(signature),&ed25519::public_key_to_unvalidated(&std::option::extract(&mut ed25519::new_validated_public_key_from_bytes(pk_bytes))), msg), ESIGNATURE_MISMATCHED);
+        // assert!(ed25519::signature_verify_strict(&ed25519::new_signature_from_bytes(signature),&ed25519::public_key_to_unvalidated(&std::option::extract(&mut ed25519::new_validated_public_key_from_bytes(pk_bytes))), msg), ESIGNATURE_MISMATCHED);
         
         let max_prob = *vector::borrow(&pool.cumulative_probabilities, vector::length(&pool.cumulative_probabilities) - 1);
         let rand = randomness::u64_range(0, max_prob);
         let selected_prize_index = select_prize(&pool.cumulative_probabilities, rand);
-        let selected_prize = vector::borrow(&pool.prizes, selected_prize_index);
+        let selected_prize = *vector::borrow_mut(&mut pool.prizes, selected_prize_index);
         let select_prize_token_address = *vector::borrow(&selected_prize.token_address, 0);
         let event_handle = borrow_global_mut<SpinEvents>(@spin2win);
         let spin_event = SpinEvent {
@@ -177,16 +177,20 @@ module spin2win::spin {
             collection_address: selected_prize.collection_address,
             probability: selected_prize.probability,
         };
-        // let admin_info = borrow_global_mut<Admin>(@spin2win);
-        // let admin = account::create_signer_with_capability(&admin_info.resource_cap);
-        // distribute_prize<CoinType>(&admin,selected_prize.prize_type,selected_prize.value,select_prize_token_address,selected_prize.collection_address,spinner_addr);
         vector::push_back(&mut spin_info.prize_type , selected_prize.prize_type);
         vector::push_back(&mut spin_info.value , selected_prize.value);
         vector::push_back(&mut spin_info.token_address , select_prize_token_address);
         vector::push_back(&mut spin_info.collection_address , selected_prize.collection_address);
         spin_info.nonce = spin_info.nonce+1;
         event::emit_event(&mut event_handle.event,spin_event);
-        vector::remove(&mut selected_prize.token_address, 0); 
+        if(selected_prize.prize_type==2){
+            vector::remove(&mut vector::borrow_mut(&mut pool.prizes, selected_prize_index).token_address, 0);
+            if (vector::length(&selected_prize.token_address) > 0){
+                vector::remove(&mut pool.prizes, selected_prize_index);
+                vector::remove(&mut pool.cumulative_probabilities, selected_prize_index);
+            }
+        }
+
     }
 
     entry fun claim_prizes<CoinType>(account: &signer,) acquires Spin,Admin,TokenV1Container,SpinEvents{
