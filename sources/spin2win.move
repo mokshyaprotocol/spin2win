@@ -236,12 +236,14 @@ module spin2win::spin {
         collection_address: address,
         receiver: address
     )acquires TokenV1Container{
-        if (prize_type == PRIZE_TYPE_COIN && prize_type == PRIZE_TYPE_TOKEN) {
-            distribute_coin<CoinType>(account, receiver, value);
+        if (prize_type == PRIZE_TYPE_COIN ) {
+            distribute_coin<AptosCoin>(account, receiver, value);
         } else if (prize_type == PRIZE_TYPE_NFT) {
             distribute_nft(account, token_address,receiver);
-        } else{
-            // distribute_coin<AptosCoin>(account, receiver, value);
+        } else if(prize_type == PRIZE_TYPE_TOKEN){
+            distribute_coin<CoinType>(account, receiver, value);
+        }
+        else{
             0;
         }
     }
