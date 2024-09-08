@@ -185,7 +185,7 @@ module spin2win::spin {
         event::emit_event(&mut event_handle.event,spin_event);
         if(selected_prize.prize_type==2){
             vector::remove(&mut vector::borrow_mut(&mut pool.prizes, selected_prize_index).token_address, 0);
-            if (vector::length(&selected_prize.token_address) > 0){
+            if (vector::length(&selected_prize.token_address) == 0){
                 vector::remove(&mut pool.prizes, selected_prize_index);
                 vector::remove(&mut pool.cumulative_probabilities, selected_prize_index);
             }
@@ -241,7 +241,8 @@ module spin2win::spin {
         } else if (prize_type == PRIZE_TYPE_NFT) {
             distribute_nft(account, token_address,receiver);
         } else{
-            distribute_coin<AptosCoin>(account, receiver, value);
+            // distribute_coin<AptosCoin>(account, receiver, value);
+            0;
         }
     }
 
