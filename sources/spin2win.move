@@ -141,19 +141,8 @@ module spin2win::spin {
         vector::push_back(&mut pool.cumulative_probabilities, sum + new_probability);
     }
 
-    #[randomness]
-    entry fun spin<CoinType>(account: &signer,signature: vector<u8>,) acquires PrizePool, SpinEvents,Spin{
+    fun spin<CoinType>(account: &signer) acquires PrizePool, SpinEvents,Spin{
         let spinner_addr = signer::address_of(account);
-        if (!exists<Spin>(spinner_addr)){
-            let spin = Spin {
-                prize_type: vector[],
-                value: vector[],
-                token_address: vector[],
-                collection_address: vector[],
-                nonce: 0
-            };
-            move_to(account, spin);
-        };
         let spin_info = borrow_global_mut<Spin>(spinner_addr);
         let pool = borrow_global_mut<PrizePool>(@spin2win);
         let pk_bytes= x"6b8a589130ce4e558238d864b2c2a77f9e35dda290b98de9d2cb7490665c731f";
@@ -184,11 +173,12 @@ module spin2win::spin {
         spin_info.nonce = spin_info.nonce+1;
         event::emit_event(&mut event_handle.event,spin_event);
         if(selected_prize.prize_type==2){
-            vector::remove(&mut vector::borrow_mut(&mut pool.prizes, selected_prize_index).token_address, 0);
-            if (vector::length(&selected_prize.token_address) == 0){
+            if (vector::length(&selected_prize.token_address) == 1){
                 vector::remove(&mut pool.prizes, selected_prize_index);
                 vector::remove(&mut pool.cumulative_probabilities, selected_prize_index);
-            }
+            }else{
+            vector::remove(&mut vector::borrow_mut(&mut pool.prizes, selected_prize_index).token_address, 0);
+            };
         }
 
     }
@@ -217,7 +207,15 @@ module spin2win::spin {
         };
         event::emit_event(&mut event_handle.claim_event,prize_claim_event)
     }
-
+    entry fun remove_prizes<CoinType>(account: &signer,selected_prize_index: u64) acquires PrizePool{
+        assert!(@spin2win == signer::address_of(account), EINVALID_SIGNER);
+        let pool = borrow_global_mut<PrizePool>(@spin2win);
+        let selected_prize = *vector::borrow_mut(&mut pool.prizes, selected_prize_index);
+        if (vector::length(&selected_prize.token_address) == 0){
+                vector::remove(&mut pool.prizes, selected_prize_index);
+                vector::remove(&mut pool.cumulative_probabilities, selected_prize_index);
+            }
+    }
     fun select_prize(cumulative_probabilities: &vector<u64>, rand: u64): u64 {
         for (i in 0..vector::length(cumulative_probabilities)) {
             if (rand < *vector::borrow(cumulative_probabilities, i)) {
@@ -267,7 +265,37 @@ module spin2win::spin {
             object::transfer(account,object,receiver);
         }
     }
+    public entry fun send_bulk_nft(account: &signer,token_address:vector<address>,receiver:address){
+        let i = 0;
+        while (i < vector::length(&token_address)){
+            let object = object::address_to_object<Token>(*vector::borrow(&token_address, i));
+            object::transfer(account,object,receiver);
+            i=i+1
+        }
+    }
 
+    #[randomness]
+    entry fun free_spin<CoinType>(account: &signer,signature:vector<u8>)acquires PrizePool, SpinEvents,Spin{
+        let spinner_addr = signer::address_of(account);
+        check_user_is_register(account,spinner_addr);
+        let spin_info = borrow_global_mut<Spin>(spinner_addr);
+        let pk_bytes= x"6b8a589130ce4e558238d864b2c2a77f9e35dda290b98de9d2cb7490665c731f";
+        let vpk = &ed25519::public_key_to_unvalidated(&std::option::extract(&mut ed25519::new_validated_public_key_from_bytes(pk_bytes)));
+        let msg = bcs::to_bytes(&spinner_addr);
+        vector::append(&mut msg, bcs::to_bytes(&spin_info.nonce));
+        // Ensure that nonce is signed by admin
+        assert!(ed25519::signature_verify_strict(&ed25519::new_signature_from_bytes(signature),&ed25519::public_key_to_unvalidated(&std::option::extract(&mut ed25519::new_validated_public_key_from_bytes(pk_bytes))), msg), ESIGNATURE_MISMATCHED);
+        spin<CoinType>(account)
+    }
+    #[randomness]
+    entry fun regular_spin<CoinType>(account: &signer)acquires PrizePool, SpinEvents,Spin,Admin{
+        let spinner_addr = signer::address_of(account);
+        check_user_is_register(account,spinner_addr);
+        let admin_info = borrow_global_mut<Admin>(@spin2win);
+        let admin = account::create_signer_with_capability(&admin_info.resource_cap);
+        aptos_account::transfer_coins<CoinType>(account, signer::address_of(&admin), 10000000);
+        spin<CoinType>(account)
+    }
     public entry fun create_tokenv1_container(
         account: &signer,
         token_creator: address,
@@ -310,5 +338,17 @@ module spin2win::spin {
             create_tokenv1_container(account,token_creator,token_collection,name,token_property_version);
             i=i+1
         }
+    }
+    fun check_user_is_register(account:&signer,spinner_addr:address){
+        if (!exists<Spin>(spinner_addr)){
+            let spin = Spin {
+                prize_type: vector[],
+                value: vector[],
+                token_address: vector[],
+                collection_address: vector[],
+                nonce: 0
+            };
+            move_to(account, spin);
+        };
     }
 }
