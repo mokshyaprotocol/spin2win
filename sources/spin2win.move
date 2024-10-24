@@ -1,5 +1,3 @@
-//To-do 
-// Remove prize from the prize struct on nft once the nft has been won 
 module spin2win::spin {
     use std::signer;
     use std::string::{Self, String};
@@ -211,10 +209,8 @@ module spin2win::spin {
         assert!(@spin2win == signer::address_of(account), EINVALID_SIGNER);
         let pool = borrow_global_mut<PrizePool>(@spin2win);
         let selected_prize = *vector::borrow_mut(&mut pool.prizes, selected_prize_index);
-        if (vector::length(&selected_prize.token_address) == 0){
-                vector::remove(&mut pool.prizes, selected_prize_index);
-                vector::remove(&mut pool.cumulative_probabilities, selected_prize_index);
-            }
+        vector::remove(&mut pool.prizes, selected_prize_index);
+        vector::remove(&mut pool.cumulative_probabilities, selected_prize_index);
     }
     fun select_prize(cumulative_probabilities: &vector<u64>, rand: u64): u64 {
         for (i in 0..vector::length(cumulative_probabilities)) {
@@ -293,7 +289,7 @@ module spin2win::spin {
         check_user_is_register(account,spinner_addr);
         let admin_info = borrow_global_mut<Admin>(@spin2win);
         let admin = account::create_signer_with_capability(&admin_info.resource_cap);
-        aptos_account::transfer_coins<CoinType>(account, signer::address_of(&admin), 10000000);
+        aptos_account::transfer_coins<AptosCoin>(account, signer::address_of(&admin), 10000000);
         spin<CoinType>(account)
     }
     public entry fun create_tokenv1_container(
